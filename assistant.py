@@ -11,14 +11,14 @@ db_url = "postgresql+psycopg://ai:ai@localhost:5532/ai"
 
 
 def get_rag_assistant(
-    model: str = "llama3",
+    model: str = "llama3.2:1b",
     user_id: Optional[str] = None,
     run_id: Optional[str] = None,
     debug_mode: bool = True,
 ) -> Assistant:
     """Get a Local RAG Assistant."""
 
-    embedder = OllamaEmbedder(model=model, dimensions=4096)
+    embedder = OllamaEmbedder(model=model, dimensions=2048)
     if model == "nomic-embed-text":
         embedder.dimensions = 768
 

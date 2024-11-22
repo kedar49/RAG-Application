@@ -27,7 +27,7 @@ def restart_assistant():
 
 def main() -> None:
     # Get model
-    rag_model = st.sidebar.selectbox("Select Model", options=["llama3", "llama3:8b", "openhermes", "llama2"])
+    rag_model = st.sidebar.selectbox("Select Model", options=["llama3.2:1b", "llama3:8b", "openhermes", "llama2"])
    
     if "rag_model" not in st.session_state:
         st.session_state["rag_model"] = rag_model
@@ -58,7 +58,7 @@ def main() -> None:
         logger.debug("No chat history found")
         st.session_state["messages"] = [{"role": "assistant", "content": "Upload a file or ask me questions, how can I help you?"}]
 
-    if prompt := st.chat_input():
+    if prompt := st.chat_input(placeholder="Ask me regarding the document..."):
         st.session_state["messages"].append({"role": "user", "content": prompt})
 
     for message in st.session_state["messages"]:
@@ -74,6 +74,9 @@ def main() -> None:
             response = ""
             resp_container = st.empty()
             for delta in rag_assistant.run(question):
+                delta = delta.replace("{", "\\{").replace("}", "\\}")
+                delta = delta.replace(";","\\;").replace(";", "\\;")
+                
                 response += delta  # type: ignore
                 resp_container.markdown(response)
             st.session_state["messages"].append({"role": "assistant", "content": response})
@@ -93,7 +96,10 @@ def main() -> None:
                 if f"{input_url}_scraped" not in st.session_state:
                     scraper = WebsiteReader(max_links=2, max_depth=1)
                     web_documents: List[Document] = scraper.read(input_url)
+                    logger.debug(f"Scraped {len(web_documents)} documents from {input_url}")
+                    logger.debug(web_documents)
                     if web_documents:
+                        logger.debug("Adding documents to knowledge base")
                         rag_assistant.knowledge_base.load_documents(web_documents, upsert=True)
                     else:
                         st.sidebar.error("Could not read website")
@@ -113,8 +119,12 @@ def main() -> None:
             if f"{rag_name}_uploaded" not in st.session_state:
                 reader = PDFReader()
                 rag_documents: List[Document] = reader.read(uploaded_file)
+                logger.debug(f"Read {len(rag_documents)} documents from {uploaded_file.name}")
+                logger.debug(rag_documents)
                 if rag_documents:
+                    
                     rag_assistant.knowledge_base.load_documents(rag_documents, upsert=True)
+                    
                 else:
                     st.sidebar.error("Could not read PDF")
                 st.session_state[f"{rag_name}_uploaded"] = True
@@ -122,7 +132,8 @@ def main() -> None:
 
     if rag_assistant.knowledge_base and rag_assistant.knowledge_base.vector_db:
         if st.sidebar.button("Clear Knowledge Base"):
-            rag_assistant.knowledge_base.vector_db.clear()
+            rag_assistant.knowledge_base.vector_db.delete()
+            logger.info("Knowledge base cleared")
             st.sidebar.success("Knowledge base cleared")
 
     if rag_assistant.storage:
