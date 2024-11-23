@@ -11,7 +11,7 @@ from assistant import get_rag_assistant
 
 st.set_page_config(
     page_title="Local RAG",
-    page_icon=":orange_heart:",
+    page_icon=":robot:",
 )
 
 
@@ -73,13 +73,28 @@ def main() -> None:
         with st.chat_message("assistant"):
             response = ""
             resp_container = st.empty()
-            for delta in rag_assistant.run(question):
-                delta = delta.replace("{", "\\{").replace("}", "\\}")
-                delta = delta.replace(";","\\;").replace(";", "\\;")
+            index=0
+            try:
                 
-                response += delta  # type: ignore
+                for delta in rag_assistant.run(question):
+                    # delta = delta.replace("{", "\\\{").replace("}", "\\}")
+                    # delta = delta.replace(";","\\\;").replace(";", "\\\;")
+                    
+                    # response+=str(index)+
+                    # logger.debug(f"{index}Delta:+ "+str(delta))
+                    # delta = delta.replace("{", "\\\{").replace("}", "\\}")
+                    index+=1
+                    response="".join([response,str(delta)])  # type: ignore
+                    
+                    resp_container.markdown(response)
+                # resp_container.markdown(response)
+            except Exception as e:
+                response = f"Error: {e}"
                 resp_container.markdown(response)
+                
+                # 
             st.session_state["messages"].append({"role": "assistant", "content": response})
+            logger.debug(f"Assistant response: {response}")
 
     if rag_assistant.knowledge_base:
 

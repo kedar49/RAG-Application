@@ -1,6 +1,6 @@
 ollama
 pgvector
-phidata
+phidata==2.3.75
 psycopg[binary]
 pypdf
 sqlalchemy
