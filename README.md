@@ -1,4 +1,4 @@
-# RAGit
+# Local RAG
 
 A multi-agent RAG system that refuses to hallucinate. Built with LangGraph, Ollama, and pgvector — runs entirely on your machine, no API keys needed.
 
