@@ -1,3 +1,64 @@
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
-.venvs/
-env
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.env.local
+
+# ── Secrets — NEVER commit these ─────────────────────────────────────────────
+.env
+
+# ── Distribution / packaging ──────────────────────────────────────────────────
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+wheels/
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ── Editors ───────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Model cache (sentence-transformers downloads here) ────────────────────────
+.cache/
+*.bin
+*.safetensors
+
+# ── Docker volumes (if accidentally created locally) ─────────────────────────
+pgvector_data/
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── Misc ─────────────────────────────────────────────────────────────────────
+*.zip
+*.tar.gz
+tempCodeRunnerFile*

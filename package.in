@@ -1,9 +1,0 @@
-ollama
-pgvector
-phidata==2.3.75
-psycopg[binary]
-pypdf
-sqlalchemy
-streamlit
-bs4
-duckduckgo-search

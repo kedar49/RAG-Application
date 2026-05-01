@@ -1,166 +1,407 @@
-from typing import List
+"""
+RAGit — Multi-Agent RAG System
+Upgraded Streamlit UI with:
+  - Real-time pipeline status indicators
+  - Grounded citations panel
+  - Confidence scores
+  - Faithfulness indicator
+  - Dark-mode friendly styling
+  - Knowledge base management
+"""
 
+import logging
 import streamlit as st
-from phi.assistant import Assistant
-from phi.document import Document
-from phi.document.reader.pdf import PDFReader
-from phi.document.reader.website import WebsiteReader
-from phi.utils.log import logger
+from typing import Optional
 
-from assistant import get_rag_assistant
+from agents.orchestrator import run_rag_pipeline
+from core.vector_store import clear_collection, get_vector_store
+from ingestion.pdf_ingester import ingest_pdf
+from ingestion.web_ingester import ingest_url
+from config import settings
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Local RAG",
-    page_icon=":robot:",
+    page_title="RAGit — Multi-Agent RAG",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
+# ── Custom CSS ────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-def restart_assistant():
-    st.session_state["rag_assistant"] = None
-    st.session_state["rag_assistant_run_id"] = None
-    if "url_scrape_key" in st.session_state:
-        st.session_state["url_scrape_key"] += 1
-    if "file_uploader_key" in st.session_state:
-        st.session_state["file_uploader_key"] += 1
-    st.rerun()
+/* ── Global ─────────────────────────────────────────────────── */
+html, body, [class*="css"] {
+    font-family: 'Inter', sans-serif;
+}
+
+/* ── Sidebar ────────────────────────────────────────────────── */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #0f0f1a 0%, #1a1a2e 100%);
+    border-right: 1px solid #2a2a4a;
+}
+section[data-testid="stSidebar"] * {
+    color: #e0e0f5 !important;
+}
+section[data-testid="stSidebar"] .stSelectbox label,
+section[data-testid="stSidebar"] .stTextInput label,
+section[data-testid="stSidebar"] .stFileUploader label {
+    color: #a0a0c5 !important;
+    font-size: 0.85rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* ── Main chat area ─────────────────────────────────────────── */
+.main .block-container {
+    padding-top: 1rem;
+    max-width: 900px;
+}
+
+/* ── Chat messages ───────────────────────────────────────────── */
+.stChatMessage {
+    border-radius: 12px !important;
+    margin-bottom: 0.75rem !important;
+}
+
+/* ── Citations card ─────────────────────────────────────────── */
+.citation-card {
+    background: linear-gradient(135deg, #1e1e3a 0%, #16213e 100%);
+    border: 1px solid #2a2a5a;
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    margin: 0.4rem 0;
+    font-size: 0.85rem;
+}
+.citation-card .source-label {
+    color: #7c83ff;
+    font-weight: 600;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+.citation-card .excerpt {
+    color: #b0b0d0;
+    font-style: italic;
+    margin-top: 0.25rem;
+    line-height: 1.5;
+}
+
+/* ── Confidence badge ───────────────────────────────────────── */
+.confidence-high  { color: #4ade80; font-weight: 600; }
+.confidence-mid   { color: #fbbf24; font-weight: 600; }
+.confidence-low   { color: #f87171; font-weight: 600; }
+
+/* ── Refusal banner ─────────────────────────────────────────── */
+.refusal-banner {
+    background: linear-gradient(135deg, #2d1b1b, #1f1515);
+    border: 1px solid #5a2020;
+    border-radius: 10px;
+    padding: 1rem;
+    color: #ff9999;
+}
+
+/* ── Pipeline status ────────────────────────────────────────── */
+.pipeline-step {
+    display: inline-block;
+    background: #1e1e3a;
+    border: 1px solid #3a3a6a;
+    border-radius: 20px;
+    padding: 0.2rem 0.6rem;
+    font-size: 0.75rem;
+    color: #9090cc;
+    margin-right: 0.3rem;
+}
+
+/* ── Model badge ────────────────────────────────────────────── */
+.model-badge {
+    background: linear-gradient(135deg, #2d1f6e, #1a1040);
+    border: 1px solid #4a3a9a;
+    border-radius: 6px;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.75rem;
+    color: #a090ff;
+    font-weight: 500;
+}
+
+/* ── Section headers ─────────────────────────────────────────── */
+.section-header {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #6060aa;
+    font-weight: 600;
+    margin: 1rem 0 0.4rem 0;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid #2a2a4a;
+}
+</style>
+""", unsafe_allow_html=True)
 
 
-def main() -> None:
-    # Get model
-    rag_model = st.sidebar.selectbox("Select Model", options=["llama3.2:1b", "llama3:8b", "openhermes", "llama2"])
-   
-    if "rag_model" not in st.session_state:
-        st.session_state["rag_model"] = rag_model
-  
-    elif st.session_state["rag_model"] != rag_model:
-        st.session_state["rag_model"] = rag_model
-        restart_assistant()
+# ── Session state init ─────────────────────────────────────────────────────────
+def _init_session():
+    defaults = {
+        "messages": [],
+        "url_key": 0,
+        "file_key": 100,
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
 
-    rag_assistant: Assistant
-    if "rag_assistant" not in st.session_state or st.session_state["rag_assistant"] is None:
-        logger.info(f"---*--- Creating {rag_model} Assistant ---*---")
-        rag_assistant = get_rag_assistant(model=rag_model)
-        st.session_state["rag_assistant"] = rag_assistant
-    else:
-        rag_assistant = st.session_state["rag_assistant"]
 
-    try:
-        st.session_state["rag_assistant_run_id"] = rag_assistant.create_run()
-    except Exception:
-        st.warning("Could not create assistant, is the database running?")
+# ── Confidence badge renderer ──────────────────────────────────────────────────
+def _render_confidence(confidence: float, refused: bool):
+    if refused:
+        st.markdown(
+            '<span class="confidence-low">⚠ Insufficient context</span>',
+            unsafe_allow_html=True,
+        )
         return
-
-    assistant_chat_history = rag_assistant.memory.get_chat_history()
-    if len(assistant_chat_history) > 0:
-        logger.debug("Loading chat history")
-        st.session_state["messages"] = assistant_chat_history
+    if confidence >= 0.75:
+        cls, label = "confidence-high", "High"
+    elif confidence >= 0.5:
+        cls, label = "confidence-mid", "Medium"
     else:
-        logger.debug("No chat history found")
-        st.session_state["messages"] = [{"role": "assistant", "content": "Upload a file or ask me questions, how can I help you?"}]
+        cls, label = "confidence-low", "Low"
 
-    if prompt := st.chat_input(placeholder="Ask me regarding the document..."):
-        st.session_state["messages"].append({"role": "user", "content": prompt})
+    st.markdown(
+        f'<span class="{cls}">● {label} confidence ({confidence:.0%})</span>',
+        unsafe_allow_html=True,
+    )
 
-    for message in st.session_state["messages"]:
-        if message["role"] == "system":
-            continue
-        with st.chat_message(message["role"]):
-            st.write(message["content"])
 
-    last_message = st.session_state["messages"][-1]
-    if last_message.get("role") == "user":
-        question = last_message["content"]
-        with st.chat_message("assistant"):
-            response = ""
-            resp_container = st.empty()
-            index=0
+# ── Citations renderer ─────────────────────────────────────────────────────────
+def _render_citations(citations: list[dict]):
+    if not citations:
+        return
+    st.markdown(
+        '<div class="section-header">📎 Sources</div>', unsafe_allow_html=True
+    )
+    for c in citations:
+        num = c.get("source_number", "?")
+        source = c.get("source", "Unknown")
+        page = c.get("page")
+        excerpt = c.get("excerpt", "")
+
+        page_str = f" · Page {page}" if page else ""
+        excerpt_html = (
+            f'<div class="excerpt">"{excerpt}"</div>' if excerpt else ""
+        )
+        st.markdown(
+            f"""
+            <div class="citation-card">
+                <span class="source-label">[Source {num}] {source}{page_str}</span>
+                {excerpt_html}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+# ── Sidebar ────────────────────────────────────────────────────────────────────
+def _render_sidebar():
+    with st.sidebar:
+        st.markdown(
+            "## 🤖 RAGit\n*Multi-Agent RAG System*",
+        )
+        st.divider()
+
+        # Model info
+        st.markdown('<div class="section-header">Models</div>', unsafe_allow_html=True)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(
+                f'<div class="model-badge">🧠 {settings.generation_model}</div>',
+                unsafe_allow_html=True,
+            )
+        with col2:
+            st.markdown(
+                f'<div class="model-badge">🔍 {settings.validation_model}</div>',
+                unsafe_allow_html=True,
+            )
+        st.caption(f"Embedder: {settings.embedding_model}")
+        st.divider()
+
+        # Knowledge base ingestion
+        st.markdown('<div class="section-header">Knowledge Base</div>', unsafe_allow_html=True)
+
+        # URL ingestion
+        url_input = st.text_input(
+            "Add URL",
+            placeholder="https://...",
+            key=f"url_{st.session_state['url_key']}",
+        )
+        if st.button("📥 Ingest URL", use_container_width=True):
+            if url_input:
+                with st.spinner("Scraping and embedding..."):
+                    try:
+                        n = ingest_url(url_input)
+                        st.success(f"✅ Added {n} chunks from URL")
+                        st.session_state["url_key"] += 1
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+
+        # PDF ingestion
+        uploaded_file = st.file_uploader(
+            "Upload PDF",
+            type=["pdf"],
+            key=f"file_{st.session_state['file_key']}",
+        )
+        if uploaded_file:
+            file_key = f"ingested_{uploaded_file.name}"
+            if file_key not in st.session_state:
+                with st.spinner(f"Processing {uploaded_file.name}..."):
+                    try:
+                        n = ingest_pdf(uploaded_file.read(), uploaded_file.name)
+                        st.success(f"✅ Added {n} chunks from PDF")
+                        st.session_state[file_key] = True
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+
+        st.divider()
+
+        # Clear KB
+        if st.button("🗑️ Clear Knowledge Base", use_container_width=True, type="secondary"):
             try:
-                
-                for delta in rag_assistant.run(question):
-                    # delta = delta.replace("{", "\\\{").replace("}", "\\}")
-                    # delta = delta.replace(";","\\\;").replace(";", "\\\;")
-                    
-                    # response+=str(index)+
-                    # logger.debug(f"{index}Delta:+ "+str(delta))
-                    # delta = delta.replace("{", "\\\{").replace("}", "\\}")
-                    index+=1
-                    response="".join([response,str(delta)])  # type: ignore
-                    
-                    resp_container.markdown(response)
-                # resp_container.markdown(response)
+                clear_collection()
+                st.session_state.clear()
+                _init_session()
+                st.success("Knowledge base cleared")
+                st.rerun()
             except Exception as e:
-                response = f"Error: {e}"
-                resp_container.markdown(response)
-                
-                # 
-            st.session_state["messages"].append({"role": "assistant", "content": response})
-            logger.debug(f"Assistant response: {response}")
+                st.error(f"❌ {e}")
 
-    if rag_assistant.knowledge_base:
-
-        if "url_scrape_key" not in st.session_state:
-            st.session_state["url_scrape_key"] = 0
-
-        input_url = st.sidebar.text_input(
-            "Add URL to Knowledge Base", type="default", key=st.session_state["url_scrape_key"]
-        )
-        add_url_button = st.sidebar.button("Add URL")
-        if add_url_button:
-            if input_url is not None:
-                alert = st.sidebar.info("Processing URLs...", icon="ℹ️")
-                if f"{input_url}_scraped" not in st.session_state:
-                    scraper = WebsiteReader(max_links=2, max_depth=1)
-                    web_documents: List[Document] = scraper.read(input_url)
-                    logger.debug(f"Scraped {len(web_documents)} documents from {input_url}")
-                    logger.debug(web_documents)
-                    if web_documents:
-                        logger.debug("Adding documents to knowledge base")
-                        rag_assistant.knowledge_base.load_documents(web_documents, upsert=True)
-                    else:
-                        st.sidebar.error("Could not read website")
-                    st.session_state[f"{input_url}_uploaded"] = True
-                alert.empty()
-
-        # Add PDFs to knowledge base
-        if "file_uploader_key" not in st.session_state:
-            st.session_state["file_uploader_key"] = 100
-
-        uploaded_file = st.sidebar.file_uploader(
-            "Add a PDF :page_facing_up:", type="pdf", key=st.session_state["file_uploader_key"]
-        )
-        if uploaded_file is not None:
-            alert = st.sidebar.info("Processing PDF...", icon="🧠")
-            rag_name = uploaded_file.name.split(".")[0]
-            if f"{rag_name}_uploaded" not in st.session_state:
-                reader = PDFReader()
-                rag_documents: List[Document] = reader.read(uploaded_file)
-                logger.debug(f"Read {len(rag_documents)} documents from {uploaded_file.name}")
-                logger.debug(rag_documents)
-                if rag_documents:
-                    
-                    rag_assistant.knowledge_base.load_documents(rag_documents, upsert=True)
-                    
-                else:
-                    st.sidebar.error("Could not read PDF")
-                st.session_state[f"{rag_name}_uploaded"] = True
-            alert.empty()
-
-    if rag_assistant.knowledge_base and rag_assistant.knowledge_base.vector_db:
-        if st.sidebar.button("Clear Knowledge Base"):
-            rag_assistant.knowledge_base.vector_db.delete()
-            logger.info("Knowledge base cleared")
-            st.sidebar.success("Knowledge base cleared")
-
-    if rag_assistant.storage:
-        rag_assistant_run_ids: List[str] = rag_assistant.storage.get_all_run_ids()
-        new_rag_assistant_run_id = st.sidebar.selectbox("Run ID", options=rag_assistant_run_ids)
-        if st.session_state["rag_assistant_run_id"] != new_rag_assistant_run_id:
-            logger.info(f"---*--- Loading {rag_model} run: {new_rag_assistant_run_id} ---*---")
-            st.session_state["rag_assistant"] = get_rag_assistant(model=rag_model, run_id=new_rag_assistant_run_id)
+        # Clear chat
+        if st.button("💬 Clear Chat", use_container_width=True, type="secondary"):
+            st.session_state["messages"] = []
             st.rerun()
 
-    if st.sidebar.button("New Run"):
-        restart_assistant()
+        st.divider()
+        st.markdown(
+            '<div class="section-header">Pipeline Config</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            f"Retrieval top-K: **{settings.retrieval_top_k}** → "
+            f"Rerank to: **{settings.rerank_top_k}** → "
+            f"Faithfulness threshold: **{settings.faithfulness_threshold}**"
+        )
 
+
+# ── Main chat interface ────────────────────────────────────────────────────────
+def _render_chat():
+    # Header
+    st.markdown("## 🤖 RAGit")
+    st.caption(
+        "Multi-Agent RAG · Hybrid Search · Cross-Encoder Reranking · "
+        "Hallucination Guard · Grounded Citations"
+    )
+    st.divider()
+
+    # Render message history
+    for msg in st.session_state["messages"]:
+        role = msg["role"]
+        with st.chat_message(role):
+            st.markdown(msg["content"])
+
+            # Render stored citations if available
+            if role == "assistant" and "citations" in msg and msg["citations"]:
+                with st.expander("📎 View Sources", expanded=False):
+                    _render_citations(msg["citations"])
+                    _render_confidence(
+                        msg.get("confidence", 0.0),
+                        msg.get("refused", False),
+                    )
+
+    # Chat input
+    if prompt := st.chat_input("Ask me about your documents..."):
+        st.session_state["messages"].append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # Run the multi-agent pipeline
+        with st.chat_message("assistant"):
+            # Pipeline progress indicators
+            status_placeholder = st.empty()
+            answer_placeholder = st.empty()
+
+            with status_placeholder:
+                with st.status("Running multi-agent pipeline...", expanded=True) as status:
+                    st.write("🔄 Query Agent — analyzing & rewriting query...")
+                    st.write("🔍 Retrieval Agent — hybrid search + reranking...")
+                    st.write("✅ Validation Agent — faithfulness check...")
+                    st.write("✍️ Generation Agent — building grounded answer...")
+
+                    # Execute pipeline
+                    result = run_rag_pipeline(
+                        query=prompt,
+                        chat_history=[],
+                    )
+                    status.update(
+                        label="✅ Pipeline complete" if not result.get("refused") else "⚠ Insufficient context",
+                        state="complete" if not result.get("refused") else "error",
+                        expanded=False,
+                    )
+
+            # Display the answer
+            answer = result.get("answer", "An error occurred.")
+            citations = result.get("citations", [])
+            confidence = result.get("confidence", 0.0)
+            refused = result.get("refused", False)
+
+            answer_placeholder.markdown(answer)
+
+            # Show pipeline debug details in expander
+            with st.expander("📊 Pipeline Details", expanded=False):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Faithfulness", f"{result.get('faithfulness_score', 0):.0%}")
+                with col2:
+                    st.metric("Confidence", f"{confidence:.0%}")
+                with col3:
+                    st.metric("Sources Found", len(result.get("retrieved_docs", [])))
+
+                if result.get("rewritten_queries"):
+                    st.markdown("**Query Reformulations:**")
+                    for i, q in enumerate(result["rewritten_queries"], 1):
+                        st.markdown(f"  {i}. _{q}_")
+
+                if result.get("validation_reasoning"):
+                    st.markdown(f"**Validation:** {result['validation_reasoning']}")
+
+            # Citations
+            if citations:
+                with st.expander("📎 Sources", expanded=True):
+                    _render_citations(citations)
+                    _render_confidence(confidence, refused)
+
+        # Store in message history (with metadata)
+        st.session_state["messages"].append({
+            "role": "assistant",
+            "content": answer,
+            "citations": citations,
+            "confidence": confidence,
+            "refused": refused,
+        })
+
+
+# ── Entry point ────────────────────────────────────────────────────────────────
+def main():
+    _init_session()
+    _render_sidebar()
+    _render_chat()
+
+
+if __name__ == "__main__":
+    main()
 
 main()
