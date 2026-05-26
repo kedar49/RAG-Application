@@ -11,10 +11,9 @@ Upgraded Streamlit UI with:
 
 import logging
 import streamlit as st
-from typing import Optional
 
 from agents.orchestrator import run_rag_pipeline
-from core.vector_store import clear_collection, get_vector_store
+from core.vector_store import clear_collection
 from ingestion.pdf_ingester import ingest_pdf
 from ingestion.web_ingester import ingest_url
 from config import settings
@@ -344,7 +343,7 @@ def _render_chat():
                     # Execute pipeline
                     result = run_rag_pipeline(
                         query=prompt,
-                        chat_history=[],
+                        chat_history=st.session_state["messages"][:-1],
                     )
                     status.update(
                         label="✅ Pipeline complete" if not result.get("refused") else "⚠ Insufficient context",
@@ -403,5 +402,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-main()

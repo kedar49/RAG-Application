@@ -15,11 +15,13 @@ not a creative one. Higher temperature = more hallucination risk.
 import json
 import logging
 import re
+from pydantic import ValidationError
 from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from agents.state import RAGState
 from config import settings
+from schemas import RAGResponse
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,26 @@ After your answer, output a JSON block in this exact format (no other text after
 ```"""
 
 
+def _format_chat_history(messages: list | None) -> str:
+    """Formats recent chat turns so follow-up answers keep conversation context."""
+    if not messages:
+        return "No prior conversation."
+
+    formatted: list[str] = []
+    for message in messages[-6:]:
+        if isinstance(message, dict):
+            role = message.get("role", "user")
+            content = message.get("content", "")
+        else:
+            role = getattr(message, "type", getattr(message, "role", "user"))
+            content = getattr(message, "content", "")
+
+        if content:
+            formatted.append(f"{role.title()}: {content}")
+
+    return "\n".join(formatted) if formatted else "No prior conversation."
+
+
 def _extract_citations_from_docs(retrieved_docs: list) -> dict[int, dict]:
     """Maps source number (1-indexed) to document metadata."""
     citation_map: dict[int, dict] = {}
@@ -58,6 +80,51 @@ def _extract_citations_from_docs(retrieved_docs: list) -> dict[int, dict]:
             "chunk_id": doc.metadata.get("chunk_id"),
         }
     return citation_map
+
+
+def _extract_inline_citation_numbers(answer: str) -> set[int]:
+    """Collects all [Source N] citations used inline in the answer body."""
+    return {
+        int(match)
+        for match in re.findall(r"\[Source\s+(\d+)\]", answer)
+    }
+
+
+def _is_answer_grounded(answer: str, citations: list[dict], doc_meta: dict[int, dict]) -> bool:
+    """
+    Conservative grounding check:
+    - answer must cite at least one valid source inline
+    - every structured citation must refer to a retrieved source
+    """
+    inline_sources = _extract_inline_citation_numbers(answer)
+    if not inline_sources:
+        return False
+
+    if not inline_sources.issubset(set(doc_meta)):
+        return False
+
+    citation_sources = {citation["source_number"] for citation in citations}
+    if not citation_sources:
+        return False
+
+    if not inline_sources.issubset(citation_sources):
+        return False
+
+    for citation in citations:
+        if citation["source_number"] not in doc_meta:
+            return False
+
+    return True
+
+
+def _grounding_refusal_message(query: str, reason: str) -> str:
+    """Builds a user-facing refusal when generation is not grounded enough."""
+    return (
+        "I couldn't produce a fully grounded answer from the retrieved documents.\n\n"
+        f"**Question:** {query}\n\n"
+        f"**Why I stopped:** {reason}\n\n"
+        "Try rephrasing the question or adding documents that address it more directly."
+    )
 
 
 def _parse_generation_response(
@@ -98,14 +165,7 @@ def _parse_generation_response(
                     "excerpt": c.get("excerpt", ""),
                 })
         except (json.JSONDecodeError, ValueError):
-            # Fallback: generate citations from retrieved docs
-            for num, meta in doc_meta.items():
-                citations.append({
-                    "source_number": num,
-                    "source": meta["source"],
-                    "page": meta.get("page"),
-                    "excerpt": "",
-                })
+            citations = []
 
     return answer, citations, confidence
 
@@ -120,6 +180,7 @@ def generation_agent_node(state: RAGState) -> RAGState:
     query = state.get("query", "")
     context = state.get("retrieval_context", "")
     retrieved_docs = state.get("retrieved_docs", [])
+    chat_history = state.get("messages", [])
 
     logger.info(f"[GenerationAgent] Generating answer for: {query!r}")
 
@@ -132,6 +193,7 @@ def generation_agent_node(state: RAGState) -> RAGState:
     messages = [
         SystemMessage(content=GENERATION_SYSTEM),
         HumanMessage(content=(
+            f"Conversation so far:\n{_format_chat_history(chat_history)}\n\n"
             f"Source Documents:\n{context}\n\n"
             f"Question: {query}"
         )),
@@ -142,26 +204,48 @@ def generation_agent_node(state: RAGState) -> RAGState:
         answer, citations, confidence = _parse_generation_response(
             response.content, retrieved_docs
         )
+        doc_meta = _extract_citations_from_docs(retrieved_docs)
+        is_grounded = _is_answer_grounded(answer, citations, doc_meta)
+        validated = RAGResponse.model_validate({
+            "answer": answer,
+            "citations": citations,
+            "confidence": confidence,
+            "is_grounded": is_grounded,
+            "refused": not is_grounded,
+            "refusal_reason": None if is_grounded else "Generated answer was not fully grounded in retrieved sources.",
+        })
+
+        if not validated.is_grounded:
+            logger.warning("[GenerationAgent] Rejecting ungrounded answer.")
+            return {
+                **state,
+                "answer": _grounding_refusal_message(query, validated.refusal_reason or "Missing valid source support."),
+                "citations": [],
+                "confidence": 0.0,
+                "refused": True,
+                "refusal_reason": validated.refusal_reason,
+                "error": validated.refusal_reason,
+            }
 
         logger.info(
-            f"[GenerationAgent] Generated answer ({len(answer)} chars), "
-            f"citations={len(citations)}, confidence={confidence:.2f}"
+            f"[GenerationAgent] Generated answer ({len(validated.answer)} chars), "
+            f"citations={len(validated.citations)}, confidence={validated.confidence:.2f}"
         )
 
         return {
             **state,
-            "answer": answer,
-            "citations": citations,
-            "confidence": confidence,
+            "answer": validated.answer,
+            "citations": [citation.model_dump() for citation in validated.citations],
+            "confidence": validated.confidence,
             "refused": False,
             "refusal_reason": None,
         }
 
-    except Exception as e:
+    except (ValidationError, Exception) as e:
         logger.error(f"[GenerationAgent] Error: {e}")
         return {
             **state,
-            "answer": "",
+            "answer": _grounding_refusal_message(query, f"Generation error: {e}"),
             "citations": [],
             "confidence": 0.0,
             "refused": True,

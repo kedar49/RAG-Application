@@ -17,11 +17,13 @@ Why this matters:
 
 import json
 import logging
+from pydantic import ValidationError
 from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from agents.state import RAGState
 from config import settings
+from schemas import QueryAnalysis
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,26 @@ JSON Template:
 }"""
 
 
+def _format_chat_history(messages: list | None) -> str:
+    """Formats recent chat turns for history-aware query analysis."""
+    if not messages:
+        return "No prior conversation."
+
+    formatted: list[str] = []
+    for message in messages[-6:]:
+        if isinstance(message, dict):
+            role = message.get("role", "user")
+            content = message.get("content", "")
+        else:
+            role = getattr(message, "type", getattr(message, "role", "user"))
+            content = getattr(message, "content", "")
+
+        if content:
+            formatted.append(f"{role.title()}: {content}")
+
+    return "\n".join(formatted) if formatted else "No prior conversation."
+
+
 def query_agent_node(state: RAGState) -> RAGState:
     """
     LangGraph node: query analysis and rewriting.
@@ -57,6 +79,7 @@ def query_agent_node(state: RAGState) -> RAGState:
             state["query_intent"], state["needs_retrieval"]
     """
     query = state.get("query", "")
+    chat_history = state.get("messages", [])
     logger.info(f"[QueryAgent] Processing query: {query!r}")
 
     llm = ChatOllama(
@@ -68,17 +91,23 @@ def query_agent_node(state: RAGState) -> RAGState:
 
     messages = [
         SystemMessage(content=QUERY_AGENT_SYSTEM),
-        HumanMessage(content=f"User query: {query}"),
+        HumanMessage(content=(
+            f"Conversation so far:\n{_format_chat_history(chat_history)}\n\n"
+            f"Latest user query: {query}"
+        )),
     ]
 
     try:
         response = llm.invoke(messages)
-        parsed = json.loads(response.content)
+        parsed = QueryAnalysis.model_validate({
+            "original_query": query,
+            **json.loads(response.content),
+        })
 
-        rewritten = parsed.get("rewritten_queries", [query])
-        hypothetical = parsed.get("hypothetical_answer", query)
-        intent = parsed.get("intent", "factual")
-        needs_retrieval = parsed.get("needs_retrieval", True)
+        rewritten = parsed.rewritten_queries or [query]
+        hypothetical = parsed.hypothetical_answer or query
+        intent = parsed.intent or "factual"
+        needs_retrieval = parsed.needs_retrieval
 
         logger.info(
             f"[QueryAgent] intent={intent}, needs_retrieval={needs_retrieval}, "
@@ -93,7 +122,7 @@ def query_agent_node(state: RAGState) -> RAGState:
             "needs_retrieval": needs_retrieval,
         }
 
-    except (json.JSONDecodeError, KeyError) as e:
+    except (json.JSONDecodeError, KeyError, ValidationError) as e:
         # Graceful fallback: use original query if parsing fails
         logger.warning(f"[QueryAgent] JSON parse failed ({e}), using original query")
         return {

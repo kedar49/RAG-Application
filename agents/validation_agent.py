@@ -17,11 +17,13 @@ Uses phi4-mini:3.8b — lightweight but strong reasoning model.
 
 import json
 import logging
+from pydantic import ValidationError
 from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from agents.state import RAGState
 from config import settings
+from schemas import ValidationResult
 
 logger = logging.getLogger(__name__)
 
@@ -88,11 +90,11 @@ def validation_agent_node(state: RAGState) -> RAGState:
 
     try:
         response = llm.invoke(messages)
-        parsed = json.loads(response.content)
+        parsed = ValidationResult.model_validate(json.loads(response.content))
 
-        is_sufficient = parsed.get("is_sufficient", False)
-        faithfulness_score = float(parsed.get("faithfulness_score", 0.0))
-        reasoning = parsed.get("reasoning", "")
+        is_sufficient = parsed.is_sufficient
+        faithfulness_score = parsed.faithfulness_score
+        reasoning = parsed.reasoning
 
         # Apply threshold — even if LLM says True, check the score
         if faithfulness_score < settings.faithfulness_threshold:
@@ -111,7 +113,7 @@ def validation_agent_node(state: RAGState) -> RAGState:
             "validation_reasoning": reasoning,
         }
 
-    except (json.JSONDecodeError, ValueError) as e:
+    except (json.JSONDecodeError, ValueError, ValidationError) as e:
         # On parse failure, be CONSERVATIVE — fail validation
         logger.warning(f"[ValidationAgent] Parse failed ({e}), defaulting to fail.")
         return {

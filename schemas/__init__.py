@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 class Citation(BaseModel):
     """A single grounded citation backing a claim in the answer."""
+    source_number: int = Field(description="1-indexed source label used in the answer")
     source: str = Field(description="Document source file or URL")
     page: Optional[int] = Field(default=None, description="Page number if from a PDF")
     chunk_id: Optional[str] = Field(default=None, description="Internal chunk identifier")

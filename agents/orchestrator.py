@@ -30,12 +30,15 @@ import logging
 from langgraph.graph import StateGraph, END
 
 from agents.state import RAGState
+from agents.meta_agent import meta_agent_node
 from agents.query_agent import query_agent_node
 from agents.retrieval_agent import retrieval_agent_node
 from agents.validation_agent import validation_agent_node
 from agents.generation_agent import generation_agent_node, refusal_node
 
 logger = logging.getLogger(__name__)
+
+_RAG_GRAPH = None
 
 
 # ── Conditional edge functions ────────────────────────────────────────────────
@@ -45,7 +48,7 @@ def route_after_query(state: RAGState) -> str:
     if not state.get("needs_retrieval", True):
         # Greeting or meta-question — go directly to generation (no retrieval)
         logger.debug("[Orchestrator] Skipping retrieval (query doesn't need KB)")
-        return "generate_direct"
+        return "meta"
     return "retrieve"
 
 
@@ -69,6 +72,7 @@ def build_rag_graph() -> StateGraph:
 
     # ── Register nodes ────────────────────────────────────────────────────────
     graph.add_node("query_agent", query_agent_node)
+    graph.add_node("meta_agent", meta_agent_node)
     graph.add_node("retrieval_agent", retrieval_agent_node)
     graph.add_node("validation_agent", validation_agent_node)
     graph.add_node("generation_agent", generation_agent_node)
@@ -83,7 +87,7 @@ def build_rag_graph() -> StateGraph:
         route_after_query,
         {
             "retrieve": "retrieval_agent",
-            "generate_direct": "generation_agent",  # skip retrieval for greetings
+            "meta": "meta_agent",
         },
     )
 
@@ -101,6 +105,7 @@ def build_rag_graph() -> StateGraph:
     )
 
     # ── Terminal edges ────────────────────────────────────────────────────────
+    graph.add_edge("meta_agent", END)
     graph.add_edge("generation_agent", END)
     graph.add_edge("refusal_node", END)
 
@@ -118,7 +123,9 @@ def run_rag_pipeline(query: str, chat_history: list | None = None) -> RAGState:
     Returns:
         Final RAGState with answer, citations, confidence, etc.
     """
-    rag_graph = build_rag_graph()
+    global _RAG_GRAPH
+    if _RAG_GRAPH is None:
+        _RAG_GRAPH = build_rag_graph()
 
     initial_state: RAGState = {
         "query": query,
@@ -143,7 +150,7 @@ def run_rag_pipeline(query: str, chat_history: list | None = None) -> RAGState:
     logger.info(f"[Orchestrator] Starting RAG pipeline for query: {query!r}")
 
     try:
-        final_state = rag_graph.invoke(initial_state)
+        final_state = _RAG_GRAPH.invoke(initial_state)
         logger.info(
             f"[Orchestrator] Pipeline complete. "
             f"refused={final_state.get('refused')}, "
