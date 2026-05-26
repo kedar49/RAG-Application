@@ -1,5 +1,5 @@
 """
-RAGit — Multi-Agent RAG System
+GroundedRAG — Multi-Agent RAG System
 Upgraded Streamlit UI with:
   - Real-time pipeline status indicators
   - Grounded citations panel
@@ -21,9 +21,18 @@ from config import settings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+def _load_source_inventory() -> tuple[list[dict], str | None]:
+    """Fetches indexed source inventory for the sidebar."""
+    try:
+        return list_sources(), None
+    except Exception as exc:
+        logger.warning("Source inventory unavailable: %s", exc)
+        return [], str(exc)
+
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="RAGit — Multi-Agent RAG",
+    page_title="GroundedRAG — Multi-Agent RAG",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -208,8 +217,10 @@ def _render_citations(citations: list[dict]):
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 def _render_sidebar():
     with st.sidebar:
+        sources, source_error = _load_source_inventory()
+
         st.markdown(
-            "## 🤖 RAGit\n*Multi-Agent RAG System*",
+            "## GroundedRAG\n*Multi-Agent RAG System*",
         )
         st.divider()
 
@@ -243,7 +254,10 @@ def _render_sidebar():
                 with st.spinner("Scraping and embedding..."):
                     try:
                         n = ingest_url(url_input)
-                        st.success(f"✅ Added {n} chunks from URL")
+                        if n > 0:
+                            st.success(f"Added {n} chunks from URL")
+                        else:
+                            st.info("That URL is already indexed, so I skipped re-ingestion.")
                         st.session_state["url_key"] += 1
                         st.rerun()
                     except Exception as e:
@@ -261,7 +275,10 @@ def _render_sidebar():
                 with st.spinner(f"Processing {uploaded_file.name}..."):
                     try:
                         n = ingest_pdf(uploaded_file.read(), uploaded_file.name)
-                        st.success(f"✅ Added {n} chunks from PDF")
+                        if n > 0:
+                            st.success(f"Added {n} chunks from PDF")
+                        else:
+                            st.info("That PDF is already indexed, so I skipped re-ingestion.")
                         st.session_state[file_key] = True
                     except Exception as e:
                         st.error(f"❌ {e}")
@@ -295,11 +312,6 @@ def _render_sidebar():
             f"Faithfulness threshold: **{settings.faithfulness_threshold}**"
         )
 
-        try:
-            sources = list_sources()
-        except Exception:
-            sources = []
-
         if sources:
             st.markdown(
                 '<div class="section-header">Source Inventory</div>',
@@ -319,12 +331,18 @@ def _render_sidebar():
                 use_container_width=True,
                 hide_index=True,
             )
+        elif source_error:
+            st.markdown(
+                '<div class="section-header">Source Inventory</div>',
+                unsafe_allow_html=True,
+            )
+            st.caption("Source inventory is unavailable until the database is reachable.")
 
 
 # ── Main chat interface ────────────────────────────────────────────────────────
 def _render_chat():
     # Header
-    st.markdown("## 🤖 RAGit")
+    st.markdown("## GroundedRAG")
     st.caption(
         "Multi-Agent RAG · Hybrid Search · Cross-Encoder Reranking · "
         "Hallucination Guard · Grounded Citations"

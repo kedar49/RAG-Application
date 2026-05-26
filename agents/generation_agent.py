@@ -21,11 +21,12 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from agents.state import RAGState
 from config import settings
+from core.message_utils import content_to_text
 from schemas import RAGResponse
 
 logger = logging.getLogger(__name__)
 
-GENERATION_SYSTEM = """You are RAGit, a precise document-grounded AI assistant.
+GENERATION_SYSTEM = """You are GroundedRAG, a precise document-grounded AI assistant.
 
 Your ONLY job is to answer questions based on the provided source documents.
 
@@ -201,8 +202,9 @@ def generation_agent_node(state: RAGState) -> RAGState:
 
     try:
         response = llm.invoke(messages)
+        response_text = content_to_text(response.content)
         answer, citations, confidence = _parse_generation_response(
-            response.content, retrieved_docs
+            response_text, retrieved_docs
         )
         doc_meta = _extract_citations_from_docs(retrieved_docs)
         is_grounded = _is_answer_grounded(answer, citations, doc_meta)

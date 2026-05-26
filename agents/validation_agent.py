@@ -23,6 +23,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from agents.state import RAGState
 from config import settings
+from core.message_utils import content_to_text
 from schemas import ValidationResult
 
 logger = logging.getLogger(__name__)
@@ -90,7 +91,8 @@ def validation_agent_node(state: RAGState) -> RAGState:
 
     try:
         response = llm.invoke(messages)
-        parsed = ValidationResult.model_validate(json.loads(response.content))
+        response_text = content_to_text(response.content)
+        parsed = ValidationResult.model_validate(json.loads(response_text))
 
         is_sufficient = parsed.is_sufficient
         faithfulness_score = parsed.faithfulness_score

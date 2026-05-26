@@ -23,6 +23,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from agents.state import RAGState
 from config import settings
+from core.message_utils import content_to_text
 from schemas import QueryAnalysis
 
 logger = logging.getLogger(__name__)
@@ -99,9 +100,10 @@ def query_agent_node(state: RAGState) -> RAGState:
 
     try:
         response = llm.invoke(messages)
+        response_text = content_to_text(response.content)
         parsed = QueryAnalysis.model_validate({
             "original_query": query,
-            **json.loads(response.content),
+            **json.loads(response_text),
         })
 
         rewritten = parsed.rewritten_queries or [query]

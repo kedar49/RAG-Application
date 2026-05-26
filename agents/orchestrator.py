@@ -27,7 +27,9 @@ The graph is compiled once at import time and reused per session.
 """
 
 import logging
+from typing import cast
 from langgraph.graph import StateGraph, END
+from langgraph.graph.state import CompiledStateGraph
 
 from agents.state import RAGState
 from agents.meta_agent import meta_agent_node
@@ -38,7 +40,7 @@ from agents.generation_agent import generation_agent_node, refusal_node
 
 logger = logging.getLogger(__name__)
 
-_RAG_GRAPH = None
+_RAG_GRAPH: CompiledStateGraph | None = None
 
 
 # ── Conditional edge functions ────────────────────────────────────────────────
@@ -63,7 +65,7 @@ def route_after_validation(state: RAGState) -> str:
 
 # ── Graph construction ────────────────────────────────────────────────────────
 
-def build_rag_graph() -> StateGraph:
+def build_rag_graph() -> CompiledStateGraph:
     """
     Builds and returns the compiled LangGraph RAG pipeline.
     Call this once at startup and reuse the returned graph.
@@ -157,13 +159,13 @@ def run_rag_pipeline(query: str, chat_history: list | None = None) -> RAGState:
             f"refused={final_state.get('refused')}, "
             f"confidence={final_state.get('confidence', 0):.2f}"
         )
-        return final_state
+        return cast(RAGState, final_state)
     except Exception as e:
         logger.error(f"[Orchestrator] Pipeline error: {e}")
-        return {
+        return cast(RAGState, {
             **initial_state,
             "answer": f"An error occurred: {e}",
             "refused": True,
             "refusal_reason": str(e),
             "error": str(e),
-        }
+        })

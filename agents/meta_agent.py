@@ -11,10 +11,11 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from agents.state import RAGState
 from config import settings
+from core.message_utils import content_to_text
 
 logger = logging.getLogger(__name__)
 
-META_AGENT_SYSTEM = """You are RAGit, a helpful assistant for a local RAG app.
+META_AGENT_SYSTEM = """You are GroundedRAG, a helpful assistant for a local RAG app.
 
 You are being used only for messages that do NOT require knowledge-base retrieval.
 
@@ -47,7 +48,7 @@ def meta_agent_node(state: RAGState) -> RAGState:
         response = llm.invoke(messages)
         return {
             **state,
-            "answer": response.content.strip(),
+            "answer": content_to_text(response.content),
             "citations": [],
             "confidence": 0.9,
             "refused": False,

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (compatible; RAGit/1.0; +https://github.com/ragit)"
+        "Mozilla/5.0 (compatible; GroundedRAG/1.0; +https://github.com/kedar49/RAG-Application)"
     )
 }
 REQUEST_TIMEOUT = 10

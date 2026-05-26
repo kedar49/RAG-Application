@@ -8,14 +8,12 @@ with retrieval diagnostics for downstream inspection.
 """
 
 import logging
-import json
 import re
 from typing import Any
 
 from langchain_community.vectorstores import PGVector
 from langchain_core.documents import Document
 from rank_bm25 import BM25Okapi
-import sqlalchemy
 
 from core.embedder import get_embedder_singleton
 from config import settings
@@ -127,21 +125,7 @@ def list_sources() -> list[dict[str, Any]]:
 
 def source_exists(source_name: str) -> bool:
     """Checks whether a source with the given display name already exists."""
-    vs = get_vector_store()
-    with vs._make_session() as session:
-        collection = vs.get_collection(session)
-        if not collection:
-            return False
-
-        filter_clause = sqlalchemy.and_(
-            vs.EmbeddingStore.collection_id == collection.uuid,
-            sqlalchemy.func.jsonb_path_match(
-                vs.EmbeddingStore.cmetadata,
-                "$.source == $value",
-                json.dumps({"value": source_name}),
-            ),
-        )
-        return session.query(vs.EmbeddingStore).filter(filter_clause).first() is not None
+    return any(row["source"] == source_name for row in list_sources())
 
 
 def _get_sparse_corpus(vs: PGVector, filter: dict | None = None) -> tuple[list[Document], BM25Okapi | None]:

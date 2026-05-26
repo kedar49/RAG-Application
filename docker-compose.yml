@@ -3,7 +3,7 @@ version: "3.9"
 services:
   pgvector:
     image: pgvector/pgvector:pg16
-    container_name: ragit_pgvector
+    container_name: groundedrag_pgvector
     restart: unless-stopped
     environment:
       POSTGRES_DB: ai
@@ -22,4 +22,4 @@ services:
 
 volumes:
   pgvector_data:
-    name: ragit_pgvector_data
+    name: groundedrag_pgvector_data
