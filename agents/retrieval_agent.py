@@ -25,15 +25,39 @@ MAX_CONTEXT_CHARS = 8000   # ~2000 tokens — safe budget for context window
 
 
 def _deduplicate(docs: list[Document]) -> list[Document]:
-    """Remove duplicate documents by chunk_id or content prefix."""
-    seen: set[str] = set()
-    unique: list[Document] = []
+    """Remove duplicates while preserving the richest retrieval metadata."""
+    seen: dict[str, Document] = {}
     for doc in docs:
         doc_id = doc.metadata.get("chunk_id", doc.page_content[:64])
         if doc_id not in seen:
-            seen.add(doc_id)
-            unique.append(doc)
-    return unique
+            seen[doc_id] = doc
+            continue
+
+        existing = seen[doc_id]
+        for key, value in doc.metadata.items():
+            if key not in existing.metadata:
+                existing.metadata[key] = value
+    return list(seen.values())
+
+
+def _build_retrieval_debug(docs: list[Document]) -> list[dict]:
+    """Extracts retrieval diagnostics for UI and evaluation."""
+    debug_rows: list[dict] = []
+    for i, doc in enumerate(docs, start=1):
+        debug_rows.append({
+            "source_number": i,
+            "source": doc.metadata.get("source", "Unknown"),
+            "page": doc.metadata.get("page"),
+            "chunk_id": doc.metadata.get("chunk_id"),
+            "dense_rank": doc.metadata.get("dense_rank"),
+            "dense_score": doc.metadata.get("dense_score"),
+            "sparse_rank": doc.metadata.get("sparse_rank"),
+            "sparse_score": doc.metadata.get("sparse_score"),
+            "reranker_score": doc.metadata.get("reranker_score"),
+            "rrf_score": doc.metadata.get("rrf_score"),
+            "retrieval_channels": doc.metadata.get("retrieval_channels", []),
+        })
+    return debug_rows
 
 
 def _format_context(docs: list[Document]) -> str:
@@ -103,6 +127,7 @@ def retrieval_agent_node(state: RAGState) -> RAGState:
             **state,
             "retrieved_docs": [],
             "retrieval_context": "",
+            "retrieval_debug": [],
         }
 
     # ── Step 3: Cross-encoder reranking ───────────────────────────────────────
@@ -120,4 +145,5 @@ def retrieval_agent_node(state: RAGState) -> RAGState:
         **state,
         "retrieved_docs": reranked,
         "retrieval_context": context,
+        "retrieval_debug": _build_retrieval_debug(reranked),
     }

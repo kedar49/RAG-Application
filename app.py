@@ -13,7 +13,7 @@ import logging
 import streamlit as st
 
 from agents.orchestrator import run_rag_pipeline
-from core.vector_store import clear_collection
+from core.vector_store import clear_collection, list_sources
 from ingestion.pdf_ingester import ingest_pdf
 from ingestion.web_ingester import ingest_url
 from config import settings
@@ -295,6 +295,31 @@ def _render_sidebar():
             f"Faithfulness threshold: **{settings.faithfulness_threshold}**"
         )
 
+        try:
+            sources = list_sources()
+        except Exception:
+            sources = []
+
+        if sources:
+            st.markdown(
+                '<div class="section-header">Source Inventory</div>',
+                unsafe_allow_html=True,
+            )
+            st.caption(f"{len(sources)} sources indexed")
+            st.dataframe(
+                [
+                    {
+                        "source": row["source"],
+                        "type": row["source_type"],
+                        "chunks": row["chunks"],
+                        "pages": row["pages"],
+                    }
+                    for row in sources
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
 
 # ── Main chat interface ────────────────────────────────────────────────────────
 def _render_chat():
@@ -376,6 +401,14 @@ def _render_chat():
 
                 if result.get("validation_reasoning"):
                     st.markdown(f"**Validation:** {result['validation_reasoning']}")
+
+                if result.get("retrieval_debug"):
+                    st.markdown("**Retrieval Diagnostics:**")
+                    st.dataframe(
+                        result["retrieval_debug"],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
 
             # Citations
             if citations:

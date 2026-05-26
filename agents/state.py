@@ -44,6 +44,9 @@ class RAGState(TypedDict, total=False):
     retrieval_context: str
     """Retrieved docs formatted as a single context string for the LLM."""
 
+    retrieval_debug: list[dict[str, Any]]
+    """Per-document retrieval diagnostics for dense, sparse, and fused ranking."""
+
     # ── Validation Agent outputs ───────────────────────────────────────────────
     validation_passed: bool
     """True if retrieved context is sufficient to answer the question."""

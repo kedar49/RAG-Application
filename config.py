@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     # ── Retrieval ──────────────────────────────────────────────────────────────
     retrieval_top_k: int = 20   # dense + sparse, before reranking
     rerank_top_k: int = 5       # final docs passed to generation agent
+    dense_search_k: int = 40    # dense candidate pool before fusion
+    sparse_search_k: int = 40   # sparse candidate pool before fusion
 
     # ── Anti-Hallucination ─────────────────────────────────────────────────────
     faithfulness_threshold: float = 0.60  # below this → refuse to answer
@@ -45,6 +47,7 @@ class Settings(BaseSettings):
     # ── Chunking ───────────────────────────────────────────────────────────────
     chunk_size: int = 512
     chunk_overlap: int = 50
+    chunk_token_encoding: str = "cl100k_base"
 
 
 settings = Settings()

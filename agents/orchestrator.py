@@ -136,6 +136,7 @@ def run_rag_pipeline(query: str, chat_history: list | None = None) -> RAGState:
         "needs_retrieval": True,
         "retrieved_docs": [],
         "retrieval_context": "",
+        "retrieval_debug": [],
         "validation_passed": False,
         "faithfulness_score": 0.0,
         "validation_reasoning": "",
